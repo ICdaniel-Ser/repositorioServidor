@@ -1,0 +1,191 @@
+1. CREACIÓN DE LA RED LOCAL VIRTUAL
+El primer paso es crear una red virtual para que todos los contenedores puedan comunicarse entre sí.
+
+bash
+Copiar
+Editar
+docker network create RedVirtual
+💡 Explicación:
+
+docker network create RedVirtual: Crea una red virtual llamada RedVirtual.
+
+2. CREACIÓN DEL CONTENEDOR DE NGINX (PROXY)
+El contenedor de NginX actuará como un proxy para redirigir el tráfico a las aplicaciones PHP y Node.
+
+bash
+Copiar
+Editar
+docker run -d \
+  -p 80:80 \
+  --name nginx_proxy \
+  --network RedVirtual \
+  -v VolumenNginx:/etc/nginx \
+  nginx:latest
+💡 Explicación:
+
+-d: Ejecuta el contenedor en segundo plano (modo daemon).
+-p 80:80: Vincula el puerto 80 del contenedor con el puerto 80 de la máquina real.
+--name nginx_proxy: Asigna el nombre nginx_proxy al contenedor.
+--network RedVirtual: Conecta el contenedor a la red virtual creada previamente.
+-v VolumenNginx:/etc/nginx: Vincula un volumen llamado VolumenNginx con la carpeta interna de configuración de NginX.
+📌 Configuración del Proxy
+Para que el proxy funcione correctamente, hay que crear el archivo de configuración nginx.conf dentro del volumen.
+
+1️⃣ Crea el archivo nginx.conf en el volumen de NginX:
+
+bash
+Copiar
+Editar
+docker volume create VolumenNginx
+2️⃣ Abre un editor en tu máquina real y crea el archivo de configuración en /var/lib/docker/volumes/VolumenNginx/_data/nginx.conf con el siguiente contenido:
+
+nginx
+Copiar
+Editar
+server {
+    listen 80;
+    server_name aplicacionA.com;
+
+    location / {
+        proxy_pass http://node_app:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+server {
+    listen 80;
+    server_name aplicacionB.com;
+
+    location / {
+        proxy_pass http://php_app:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+3️⃣ Reinicia el contenedor de NginX para aplicar los cambios:
+
+bash
+Copiar
+Editar
+docker restart nginx_proxy
+3. CREACIÓN DEL CONTENEDOR DE NODE
+Ahora creamos el contenedor para la aplicación en Node.js.
+
+bash
+Copiar
+Editar
+docker run -d \
+  -p 3000:3000 \
+  --name node_app \
+  --network RedVirtual \
+  -v VolumenNode:/usr/src/app \
+  node:latest
+💡 Explicación:
+
+-p 3000:3000: Expone el puerto 3000 de la aplicación en Node.
+--name node_app: Nombre del contenedor.
+--network RedVirtual: Lo conecta a la red virtual.
+-v VolumenNode:/usr/src/app: Vincula el volumen VolumenNode con la carpeta de la aplicación.
+📌 Ejecutar una aplicación Node en el contenedor
+Para que funcione correctamente, accede al contenedor y crea un archivo server.js dentro del volumen:
+
+bash
+Copiar
+Editar
+docker exec -it node_app bash
+Dentro del contenedor:
+
+bash
+Copiar
+Editar
+cd /usr/src/app
+echo "const http = require('http');
+const server = http.createServer((req, res) => {
+  res.writeHead(200, {'Content-Type': 'text/plain'});
+  res.end('¡Hola desde Node!');
+});
+server.listen(3000, () => console.log('Servidor Node en puerto 3000'));" > server.js
+node server.js
+4. CREACIÓN DEL CONTENEDOR DE PHP
+Ahora creamos el contenedor para la aplicación PHP con Apache.
+
+bash
+Copiar
+Editar
+docker run -d \
+  -p 8000:80 \
+  --name php_app \
+  --network RedVirtual \
+  -v VolumenPHP:/var/www/html \
+  php:apache
+💡 Explicación:
+
+-p 8000:80: La aplicación PHP estará disponible en el puerto 8000.
+--name php_app: Nombre del contenedor.
+--network RedVirtual: Lo conecta a la red virtual.
+-v VolumenPHP:/var/www/html: Vincula el volumen VolumenPHP con la carpeta de Apache.
+📌 Ejecutar un archivo PHP
+Accede al contenedor y crea un archivo index.php:
+
+bash
+Copiar
+Editar
+docker exec -it php_app bash
+Dentro del contenedor:
+
+bash
+Copiar
+Editar
+cd /var/www/html
+echo "<?php echo '¡Hola desde PHP!'; ?>" > index.php
+5. CREACIÓN DE LOS CONTENEDORES DE MySQL
+Cada aplicación tendrá su propio contenedor de base de datos.
+
+📌 Base de datos para la aplicación Node.js
+
+bash
+Copiar
+Editar
+docker run -d \
+  --name mysql_node \
+  --network RedVirtual \
+  -e MYSQL_ROOT_PASSWORD=root \
+  -e MYSQL_DATABASE=node_db \
+  -v VolumenMySQLNode:/var/lib/mysql \
+  mysql:latest
+📌 Base de datos para la aplicación PHP
+
+bash
+Copiar
+Editar
+docker run -d \
+  --name mysql_php \
+  --network RedVirtual \
+  -e MYSQL_ROOT_PASSWORD=root \
+  -e MYSQL_DATABASE=php_db \
+  -v VolumenMySQLPHP:/var/lib/mysql \
+  mysql:latest
+💡 Explicación:
+
+MYSQL_ROOT_PASSWORD=root: Define la contraseña de MySQL.
+MYSQL_DATABASE=node_db y MYSQL_DATABASE=php_db: Crea bases de datos para cada aplicación.
+-v VolumenMySQLNode:/var/lib/mysql y -v VolumenMySQLPHP:/var/lib/mysql: Mantienen los datos persistentes.
+6. VERIFICAR QUE TODOS LOS CONTENEDORES ESTÁN EN FUNCIONAMIENTO
+Usa el siguiente comando para ver los contenedores en ejecución:
+
+bash
+Copiar
+Editar
+docker ps
+Deberías ver algo como esto:
+
+bash
+Copiar
+Editar
+CONTAINER ID  IMAGE          PORTS                  NAMES
+abcd1234      nginx:latest   0.0.0.0:80->80/tcp     nginx_proxy
+efgh5678      node:latest    0.0.0.0:3000->3000/tcp node_app
+ijkl9012      php:apache     0.0.0.0:8000->80/tcp   php_app
+mnop3456      mysql:latest   3306/tcp               mysql_node
+qrst6789      mysql:latest   3306/tcp               mysql_php
